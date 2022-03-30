@@ -332,7 +332,22 @@ namespace Falcor
         if (widget.var("Focal Distance", focalDistance, 0.f, FLT_MAX, 0.05f)) setFocalDistance(focalDistance);
 
         float apertureRadius = getApertureRadius();
-        if (widget.var("Aperture Radius", apertureRadius, 0.f, FLT_MAX, 0.001f)) setApertureRadius(apertureRadius);
+        if (widget.var("Aperture Radius", apertureRadius, 0.f, FLT_MAX, 0.001f))
+        {
+            setApertureRadius(apertureRadius);
+
+            if (apertureRadius <= 0.0f) setApertureFStop(0.0f);
+            else setApertureFStop(Falcor::apertureRadiusToFNumber(apertureRadius, getFocalLength(), 1.0f));
+        }
+
+        float apertureFStop = getApertureFStop();
+        if (widget.var("Aperture F-Stop", apertureFStop, 0.f, 20.0f, 0.1f))
+        {
+            setApertureFStop(apertureFStop);
+
+            if (apertureFStop <= 0.0f) setApertureRadius(0.0f);
+            else setApertureRadius(Falcor::apertureFNumberToRadius(apertureFStop, getFocalLength(), 1.0f));
+        }
 
         float shutterSpeed = getShutterSpeed();
         if (widget.var("Shutter Speed", shutterSpeed, 0.f, FLT_MAX, 0.001f)) setShutterSpeed(shutterSpeed);
@@ -384,6 +399,7 @@ namespace Falcor
         camera.def_property("frameWidth", &Camera::getFrameWidth, &Camera::setFrameWidth);
         camera.def_property("focalDistance", &Camera::getFocalDistance, &Camera::setFocalDistance);
         camera.def_property("apertureRadius", &Camera::getApertureRadius, &Camera::setApertureRadius);
+        camera.def_property("apertureFStop", &Camera::getApertureFStop, &Camera::setApertureFStop);
         camera.def_property("shutterSpeed", &Camera::getShutterSpeed, &Camera::setShutterSpeed);
         camera.def_property("ISOSpeed", &Camera::getISOSpeed, &Camera::setISOSpeed);
         camera.def_property("nearPlane", &Camera::getNearPlane, &Camera::setNearPlane);

@@ -66,6 +66,7 @@ namespace
     const char kMaxBounces[] = "maxBounces";
     const char kComputeDirect[] = "computeDirect";
     const char kUseImportanceSampling[] = "useImportanceSampling";
+    const char kUseSpectral[] = "useSpectral";
 }
 
 SpectralPathTracer::SharedPtr SpectralPathTracer::create(RenderContext* pRenderContext, const Dictionary& dict)
@@ -90,6 +91,7 @@ void SpectralPathTracer::parseDictionary(const Dictionary& dict)
         if (key == kMaxBounces) mMaxBounces = value;
         else if (key == kComputeDirect) mComputeDirect = value;
         else if (key == kUseImportanceSampling) mUseImportanceSampling = value;
+        else if (key == kUseSpectral) mUseSpectral = value;
         else logWarning("Unknown field '{}' in Spectral PathTracer dictionary.", key);
     }
 }
@@ -100,6 +102,7 @@ Dictionary SpectralPathTracer::getScriptingDictionary()
     d[kMaxBounces] = mMaxBounces;
     d[kComputeDirect] = mComputeDirect;
     d[kUseImportanceSampling] = mUseImportanceSampling;
+    d[kUseSpectral] = mUseSpectral;
     return d;
 }
 
@@ -164,6 +167,7 @@ void SpectralPathTracer::execute(RenderContext* pRenderContext, const RenderData
     mTracer.pProgram->addDefine("USE_EMISSIVE_LIGHTS", mpScene->useEmissiveLights() ? "1" : "0");
     mTracer.pProgram->addDefine("USE_ENV_LIGHT", mpScene->useEnvLight() ? "1" : "0");
     mTracer.pProgram->addDefine("USE_ENV_BACKGROUND", mpScene->useEnvBackground() ? "1" : "0");
+    mTracer.pProgram->addDefine("USE_SPECTRAL", mUseSpectral ? "1" : "0");
 
     // for optional i/o resources, set 'is_valid_<name>' defines to inform the program of which ones it can access
     mTracer.pProgram->addDefines(getValidResourceDefines(kInputChannels, renderData));

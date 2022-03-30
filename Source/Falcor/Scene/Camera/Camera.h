@@ -110,6 +110,14 @@ namespace Falcor
         */
         float getApertureRadius() const { return mData.apertureRadius; }
 
+        /** Set the camera aperture F-stop.
+        */
+        void setApertureFStop(float value) { apertureFStop = value; mDirty = true; }
+
+        /** Get the camera aperture F-stop.
+        */
+        float getApertureFStop() const { return apertureFStop; }
+
         /** Set camera shutter speed in seconds.
         */
         void setShutterSpeed(float shutterSpeed) { mData.shutterSpeed = shutterSpeed; mDirty = true; }
@@ -284,6 +292,8 @@ namespace Falcor
         mutable bool mEnablePersistentViewMat = false;
         mutable glm::mat4 mPersistentProjMat;
         mutable glm::mat4 mPersistentViewMat;
+
+        mutable float apertureFStop = 0.0f;
 
         std::string mName;
         bool mPreserveHeight = true;    ///< If true, preserve frame height on change of aspect ratio. Otherwise, preserve width.

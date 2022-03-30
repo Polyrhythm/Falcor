@@ -66,6 +66,7 @@ private:
     uint mMaxBounces = 3;
     bool mComputeDirect = true; ///< Copute direct illumination (otherwise indirect only)
     bool mUseImportanceSampling = true; ///< Use importance sampling for materials.
+    bool mUseSpectral = true; ///< Use spectrum instead of RGB.
 
     // runtime data
     uint mFrameCount = 0;

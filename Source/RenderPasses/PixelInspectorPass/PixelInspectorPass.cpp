@@ -210,8 +210,10 @@ void PixelInspectorPass::renderUI(Gui::Widgets& widget)
     if (auto outputGroup = widget.group("Output data", true))
     {
         bool displayedData = displayValues({ "linColor" }, { "Linear color", "Luminance (cd/m2)" }, [&outputGroup](PixelData& pixelData) {
+            float illuminance = pixelData.luminance * (float)M_PI;
             outputGroup.var("Linear color", pixelData.linearColor, 0.f, std::numeric_limits<float>::max(), 0.001f, false, "%.6f");
             outputGroup.var("Luminance (cd/m2)", pixelData.luminance, 0.f, std::numeric_limits<float>::max(), 0.001f, false, "%.6f");
+            outputGroup.var("Illuminance (lux)", illuminance, 0.0f, std::numeric_limits<float>::max(), 0.001f, false, "%.6f");
         });
 
         displayedData |= displayValues({ "outColor" }, { "Output color" }, [&outputGroup](PixelData& pixelData) {

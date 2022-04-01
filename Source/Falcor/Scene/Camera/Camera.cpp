@@ -353,7 +353,7 @@ namespace Falcor
         if (widget.var("Shutter Speed", shutterSpeed, 0.f, FLT_MAX, 0.001f)) setShutterSpeed(shutterSpeed);
 
         float ISOSpeed = getISOSpeed();
-        if (widget.var("ISO Speed", ISOSpeed, 0.8f, FLT_MAX, 0.25f)) setISOSpeed(ISOSpeed);
+        if (widget.var("ISO Speed", ISOSpeed, 5.0f, FLT_MAX, 5.0f)) setISOSpeed(ISOSpeed);
 
         float2 depth = float2(mData.nearZ, mData.farZ);
         if (widget.var("Depth Range", depth, 0.f, FLT_MAX, 0.1f)) setDepthRange(depth.x, depth.y);

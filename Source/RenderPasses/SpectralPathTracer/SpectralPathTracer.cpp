@@ -28,6 +28,8 @@
 #include "SpectralPathTracer.h"
 #include "RenderGraph/RenderPassHelpers.h"
 
+#include "Utils/Color/Spectrum.h"
+
 const RenderPass::Info SpectralPathTracer::kInfo { "SpectralPathTracer", "Fork of minimal pathtracer to include spectral rendering." };
 
 // Don't remove this. it's required for hot-reload to function properly
@@ -82,6 +84,8 @@ SpectralPathTracer::SpectralPathTracer(const Dictionary& dict)
     // create a sample gen
     mpSampleGenerator = SampleGenerator::create(SAMPLE_GENERATOR_UNIFORM);
     FALCOR_ASSERT(mpSampleGenerator);
+
+    mpPixelDebug = PixelDebug::create();
 }
 
 void SpectralPathTracer::parseDictionary(const Dictionary& dict)
@@ -113,11 +117,19 @@ RenderPassReflection SpectralPathTracer::reflect(const CompileData& compileData)
     addRenderPassInputs(reflector, kInputChannels);
     addRenderPassOutputs(reflector, kOutputChannels);
 
+    mFrameDim = compileData.defaultTexDims;
+
     return reflector;
 }
 
 void SpectralPathTracer::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
+    if (!mIsPixelDebugRunning)
+    {
+        mpPixelDebug->beginFrame(pRenderContext, mFrameDim);
+        mIsPixelDebugRunning = true;
+    }
+
     // Update refresh flag if options that affect the output have changed.
     auto& dict = renderData.getDictionary();
     if (mOptionsChanged)
@@ -175,10 +187,11 @@ void SpectralPathTracer::execute(RenderContext* pRenderContext, const RenderData
 
     // prepare program vars, may trigger recompilation
     if (!mTracer.pVars) prepareVars();
+    auto var = mTracer.pVars->getRootVar();
     FALCOR_ASSERT(mTracer.pVars);
+    mpPixelDebug->prepareProgram(mTracer.pProgram, var);
 
     // set constants
-    auto var = mTracer.pVars->getRootVar();
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gPRNGDimension"] = dict.keyExists(kRenderPassPRNGDimension) ? dict[kRenderPassPRNGDimension] : 0u;
 
@@ -200,6 +213,9 @@ void SpectralPathTracer::execute(RenderContext* pRenderContext, const RenderData
     // shoot the rays
     mpScene->raytrace(pRenderContext, mTracer.pProgram.get(), mTracer.pVars, uint3(targetDim, 1));
 
+    mpPixelDebug->endFrame(pRenderContext);
+    mIsPixelDebugRunning = false;
+
     mFrameCount++;
 }
 
@@ -215,6 +231,14 @@ void SpectralPathTracer::renderUI(Gui::Widgets& widget)
 
     dirty |= widget.checkbox("Use importance sampling", mUseImportanceSampling);
     widget.tooltip("Use importance sampling for materials", true);
+
+    dirty |= widget.checkbox("Use spectral rendering", mUseSpectral);
+    widget.tooltip("Use spectral rendering insted of tristimulus (RGB)", true);
+
+    if (auto group = widget.group("Debugging"))
+    {
+        mpPixelDebug->renderUI(group);
+    }
 
     if (dirty)
     {
@@ -293,4 +317,9 @@ void SpectralPathTracer::prepareVars()
 
     auto var = mTracer.pVars->getRootVar();
     mpSampleGenerator->setShaderData(var);
+}
+
+bool SpectralPathTracer::onMouseEvent(const MouseEvent& mouseEvent)
+{
+    return mpPixelDebug->onMouseEvent(mouseEvent);
 }

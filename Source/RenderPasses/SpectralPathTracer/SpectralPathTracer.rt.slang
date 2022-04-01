@@ -26,7 +26,7 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 
-/** Minimal path tracer.
+/** Spectral minimal path tracer.
 
     The purpose is to use it for validation of more complex renderers.
     The implementation here should be kept as simple/naive as possible.
@@ -41,6 +41,8 @@
     enabled/disabled from the host. This clutters the code a bit, but it is
     important as not all other renderes may support all three light types.
 
+    In addition, this pathtracer optionally supports spectral rendering.
+
     The host sets the following defines:
 
     MAX_BOUNCES             Maximum number of indirect bounces (0 means no indirect).
@@ -50,11 +52,20 @@
     USE_EMISSIVE_LIGHTS     Nonzero if emissive geometry should be used as lights.
     USE_ENV_LIGHT           Nonzero if env map is available and should be used as light source.
     USE_ENV_BACKGROUND      Nonzero if env map is available and should be used as background.
+    USE_SPECTRAL            Nonzero if spectral rendering should be used.
     is_valid_<name>         1 if optional I/O buffer with this name should be used.
 */
 
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
+
+#include "Utils/Sampling/TinyUniformSampleGenerator.slang"
+#include "Utils/Color/ColorHelpers.slang"
+#include "Utils/Color/SpectrumUtils.slang"
+
+#include "RenderPasses/SpectralPathTracer/SpectralCurve.slang"
+
+#include "Utils/Debug/PixelDebug.slang"
 
 import Scene.Raytracing;
 import Scene.Intersection;
@@ -65,8 +76,8 @@ import Rendering.Lights.LightHelpers;
 
 cbuffer CB
 {
-    uint        gFrameCount;        // Frame count since scene was loaded.
-    uint        gPRNGDimension;     // First available PRNG dimension.
+    uint gFrameCount;        // Frame count since scene was loaded.
+    uint gPRNGDimension;     // First available PRNG dimension.
 }
 
 // Inputs
@@ -85,6 +96,7 @@ static const bool kUseAnalyticLights = USE_ANALYTIC_LIGHTS;
 static const bool kUseEmissiveLights = USE_EMISSIVE_LIGHTS;
 static const bool kUseEnvLight = USE_ENV_LIGHT;
 static const bool kUseEnvBackground = USE_ENV_BACKGROUND;
+static const bool kUseSpectral = USE_SPECTRAL;
 static const float3 kDefaultBackgroundColor = float3(0, 0, 0);
 static const float kRayTMax = FLT_MAX;
 
@@ -105,6 +117,7 @@ struct ScatterRayData
     uint    pathLength;     ///< Path length in number of path segments (0 at origin, 1 at first secondary hit, etc.). Max 2^31.
     float3  origin;         ///< Next path segment origin.
     float3  direction;      ///< Next path segment direction.
+
 
     SampleGenerator sg;     ///< Per-ray state for the sample generator (up to 16B).
 
@@ -338,6 +351,7 @@ void handleHit(const HitInfo hit, inout ScatterRayData rayData)
     if (kUseAnalyticLights)
     {
         float3 Lr = evalDirectAnalytic(sd, bsdf, rayData.sg);
+
         rayData.radiance += rayData.thp * Lr;
     }
 
@@ -350,6 +364,17 @@ void handleHit(const HitInfo hit, inout ScatterRayData rayData)
     }
 
     rayData.pathLength++;
+}
+
+// this is goddamn stupid
+float3 get_next_rnd(uint3 x)
+{
+    uint k = 1103515245U;  // GLIB C
+    x = ((x>>8U)^x.yzx)*k;
+    x = ((x>>8U)^x.yzx)*k;
+    x = ((x>>8U)^x.yzx)*k;
+    
+    return float3(x)*(1.0/float(0xffffffffU));
 }
 
 /** This is the main entry point for the minimal path tracer.
@@ -367,7 +392,27 @@ void handleHit(const HitInfo hit, inout ScatterRayData rayData)
 */
 float3 tracePath(const uint2 pixel, const uint2 frameDim)
 {
+    printSetPixel(pixel);
+
+    // linear Rec. 709 RGB
     float3 outColor = float3(0.f);
+
+    // XYZ color of wavelength for path
+    // used in spectral case
+    float3 wavelengthXYZ = float3(0.f);
+    uint lambda_idx = 0;
+
+    // linear accumulation of reflectance
+    // used in spectral case
+    float col = 0.0;
+
+    if (kUseSpectral)
+    {
+        uint wavelength = floor(get_next_rnd(float3(pixel.xy, gFrameCount)).x * 440 + 360);
+        lambda_idx = wavelength - 360;
+
+        wavelengthXYZ = SpectrumUtils.wavelengthToXYZ((float)wavelength);
+    }
 
     const float3 primaryRayOrigin = gScene.camera.getPosition();
     const float3 primaryRayDir = getPrimaryRayDir(pixel, frameDim, gScene.camera);
@@ -408,11 +453,28 @@ float3 tracePath(const uint2 pixel, const uint2 frameDim)
         if (kComputeDirect)
         {
             // Always output directly emitted light, independent of whether emissive materials are treated as light sources or not.
-            outColor += bsdf.getProperties(sd).emission;
+            if (kUseSpectral)
+            {
+                col += dot(bsdf.getProperties(sd).emission, spectralCurve[lambda_idx]);
+            }
+            else
+            {
+                outColor += bsdf.getProperties(sd).emission;
+            }
 
             // Add contribution of direct light from analytic lights.
             // Light probe and mesh lights are handled by the scatter ray hit/miss shaders.
-            outColor += kUseAnalyticLights ? evalDirectAnalytic(sd, bsdf, sg) : float3(0.f);
+            if (kUseSpectral)
+            {
+                if (kUseAnalyticLights)
+                {
+                    col += dot(evalDirectAnalytic(sd, bsdf, sg), spectralCurve[lambda_idx]);
+                }
+            }
+            else
+            {
+                outColor += kUseAnalyticLights ? evalDirectAnalytic(sd, bsdf, sg) : float3(0.f);
+            }
         }
 
         // Prepare ray payload.
@@ -430,12 +492,33 @@ float3 tracePath(const uint2 pixel, const uint2 frameDim)
         }
 
         // Store contribution from scatter ray.
-        outColor += rayData.radiance;
+        if (kUseSpectral)
+        {
+            col += dot(rayData.radiance, spectralCurve[lambda_idx]);
+        }
+        else
+        {
+            outColor += rayData.radiance;
+        }
     }
     else
     {
         // Background pixel.
-        outColor = kUseEnvBackground ? gScene.envMap.eval(primaryRayDir) : kDefaultBackgroundColor;
+        if (kUseSpectral)
+        {
+            col = kUseEnvBackground ?
+                dot(gScene.envMap.eval(primaryRayDir), spectralCurve[lambda_idx]) :
+                dot(kDefaultBackgroundColor, spectralCurve[lambda_idx]);
+        }
+        else
+        {
+            outColor = kUseEnvBackground ? gScene.envMap.eval(primaryRayDir) : kDefaultBackgroundColor;
+        }
+    }
+
+    if (kUseSpectral)
+    {
+        return XYZtoRGB_Rec709(wavelengthXYZ * col);
     }
 
     return outColor;
@@ -455,6 +538,7 @@ void scatterMiss(inout ScatterRayData rayData)
     if (kUseEnvLight && (kComputeDirect || rayData.pathLength > 0))
     {
         float3 Le = gScene.envMap.eval(WorldRayDirection());
+
         rayData.radiance += rayData.thp * Le;
     }
 }

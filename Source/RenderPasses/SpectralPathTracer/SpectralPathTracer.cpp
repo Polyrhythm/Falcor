@@ -49,7 +49,7 @@ namespace
 
     // raytracing settings
     // the small the better
-    const uint32_t kMaxPayloadSizeBytes = 72u;
+    const uint32_t kMaxPayloadSizeBytes = 80u;
     const uint32_t kMaxRecursionDepth = 2u;
 
     const char kInputViewDir[] = "viewW";
@@ -244,6 +244,10 @@ void SpectralPathTracer::renderUI(Gui::Widgets& widget)
     {
         mOptionsChanged = true;
     }
+}
+
+void SpectralPathTracer::renderSpectrumUI(Gui::Widgets& widget)
+{
 }
 
 void SpectralPathTracer::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)

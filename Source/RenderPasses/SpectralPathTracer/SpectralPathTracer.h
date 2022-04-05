@@ -58,6 +58,7 @@ private:
     SpectralPathTracer(const Dictionary& dict);
     void parseDictionary(const Dictionary& dict);
     void prepareVars();
+    void renderSpectrumUI(Gui::Widgets& widget);
 
     // internal state
     Scene::SharedPtr mpScene;

@@ -59,7 +59,6 @@
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
 
-#include "Utils/Sampling/TinyUniformSampleGenerator.slang"
 #include "Utils/Color/ColorHelpers.slang"
 #include "Utils/Color/SpectrumUtils.slang"
 
@@ -117,13 +116,14 @@ struct ScatterRayData
     uint    pathLength;     ///< Path length in number of path segments (0 at origin, 1 at first secondary hit, etc.). Max 2^31.
     float3  origin;         ///< Next path segment origin.
     float3  direction;      ///< Next path segment direction.
-
+    float   col;            ///< ray spectral reflectance (only used if kUseSpectral)
+    uint    lambda_idx;     ///< ray wavelength idx (only used if kUseSpectral)
 
     SampleGenerator sg;     ///< Per-ray state for the sample generator (up to 16B).
 
     /** Initializes ray payload with default parameters.
     */
-    __init(SampleGenerator sg)
+    __init(SampleGenerator sg, uint idx)
     {
         this.terminated = false;
         this.pathLength = 0;
@@ -132,6 +132,8 @@ struct ScatterRayData
         this.origin = float3(0, 0, 0);
         this.direction = float3(0, 0, 0);
         this.sg = sg;
+        this.col = 0.0;
+        this.lambda_idx = idx;
     }
 };
 
@@ -201,6 +203,25 @@ float3 getPrimaryRayDir(uint2 launchIndex, uint2 launchDim, const Camera camera)
         // sample generator between the passes, which is error prone. The host side will issue a warning instead.
         return camera.computeRayPinhole(launchIndex, launchDim).dir;
     }
+}
+
+// takes a linear bt.709 rgb color and a wavelength index
+// idx must be (>= 390, <= 780, - 390)
+// vomits out a floating point representation of spectral "energy"
+// i don't know what the unit is
+float getSpectralReflectance(float3 rgb, uint idx)
+{
+    return dot(rgb, cie2006_basis[idx]);
+}
+
+float getSpectralEmission(float3 rgb, uint idx)
+{
+    float maximum = max(rgb.x, max(rgb.y, rgb.z));
+    /*
+    float3 emission = rgb / maximum;
+    return dot(emission, cie2006_basis[idx]) * maximum;
+    */
+    return lookupD65Rad(idx + 390) / 100.0 * maximum;
 }
 
 /** Traces a shadow ray towards a light source.
@@ -325,7 +346,15 @@ void handleHit(const HitInfo hit, inout ScatterRayData rayData)
     // Add emitted light.
     if (kUseEmissiveLights && (kComputeDirect || rayData.pathLength > 0))
     {
-        rayData.radiance += rayData.thp * bsdf.getProperties(sd).emission;
+        if (kUseSpectral)
+        {
+            rayData.col += getSpectralReflectance(rayData.thp, rayData.lambda_idx) *
+                           getSpectralEmission(bsdf.getProperties(sd).emission, rayData.lambda_idx);
+        }
+        else
+        {
+            rayData.radiance += rayData.thp * bsdf.getProperties(sd).emission;
+        }
     }
 
     // Check whether to terminate based on max depth.
@@ -352,7 +381,16 @@ void handleHit(const HitInfo hit, inout ScatterRayData rayData)
     {
         float3 Lr = evalDirectAnalytic(sd, bsdf, rayData.sg);
 
-        rayData.radiance += rayData.thp * Lr;
+        if (kUseSpectral)
+        {
+            rayData.col += getSpectralEmission(Lr, rayData.lambda_idx) *
+                           getSpectralReflectance(rayData.thp, rayData.lambda_idx);
+        }
+        else
+        {
+            rayData.radiance += rayData.thp * Lr;
+        }
+
     }
 
     // Generate scatter ray for the next path segment.
@@ -376,6 +414,7 @@ float3 get_next_rnd(uint3 x)
     
     return float3(x)*(1.0/float(0xffffffffU));
 }
+
 
 /** This is the main entry point for the minimal path tracer.
 
@@ -408,8 +447,8 @@ float3 tracePath(const uint2 pixel, const uint2 frameDim)
 
     if (kUseSpectral)
     {
-        uint wavelength = floor(get_next_rnd(float3(pixel.xy, gFrameCount)).x * 440 + 360);
-        lambda_idx = wavelength - 360;
+        uint wavelength = floor(get_next_rnd(float3(pixel.xy, gFrameCount)).x * 390 + 390);
+        lambda_idx = wavelength - 390;
 
         wavelengthXYZ = SpectrumUtils.wavelengthToXYZ((float)wavelength);
     }
@@ -455,7 +494,7 @@ float3 tracePath(const uint2 pixel, const uint2 frameDim)
             // Always output directly emitted light, independent of whether emissive materials are treated as light sources or not.
             if (kUseSpectral)
             {
-                col += dot(bsdf.getProperties(sd).emission, spectralCurve[lambda_idx]);
+                col += getSpectralEmission(bsdf.getProperties(sd).emission, lambda_idx);
             }
             else
             {
@@ -468,7 +507,7 @@ float3 tracePath(const uint2 pixel, const uint2 frameDim)
             {
                 if (kUseAnalyticLights)
                 {
-                    col += dot(evalDirectAnalytic(sd, bsdf, sg), spectralCurve[lambda_idx]);
+                    col += getSpectralEmission(evalDirectAnalytic(sd, bsdf, sg), lambda_idx);
                 }
             }
             else
@@ -478,7 +517,7 @@ float3 tracePath(const uint2 pixel, const uint2 frameDim)
         }
 
         // Prepare ray payload.
-        ScatterRayData rayData = ScatterRayData(sg);
+        ScatterRayData rayData = ScatterRayData(sg, lambda_idx);
 
         // Generate scatter ray.
         if (!generateScatterRay(sd, bsdf, isCurveHit, rayOrigin, rayData)) rayData.terminated = true;
@@ -494,7 +533,7 @@ float3 tracePath(const uint2 pixel, const uint2 frameDim)
         // Store contribution from scatter ray.
         if (kUseSpectral)
         {
-            col += dot(rayData.radiance, spectralCurve[lambda_idx]);
+            col += rayData.col;
         }
         else
         {
@@ -507,8 +546,8 @@ float3 tracePath(const uint2 pixel, const uint2 frameDim)
         if (kUseSpectral)
         {
             col = kUseEnvBackground ?
-                dot(gScene.envMap.eval(primaryRayDir), spectralCurve[lambda_idx]) :
-                dot(kDefaultBackgroundColor, spectralCurve[lambda_idx]);
+                getSpectralEmission(gScene.envMap.eval(primaryRayDir), lambda_idx) :
+                getSpectralEmission(kDefaultBackgroundColor, lambda_idx);
         }
         else
         {
@@ -518,7 +557,8 @@ float3 tracePath(const uint2 pixel, const uint2 frameDim)
 
     if (kUseSpectral)
     {
-        return XYZtoRGB_Rec709(wavelengthXYZ * col);
+        // do I multiply col against XYZ or Bt.709...?
+        return XYZtoRGB_Rec709(wavelengthXYZ) * col;
     }
 
     return outColor;
@@ -539,7 +579,15 @@ void scatterMiss(inout ScatterRayData rayData)
     {
         float3 Le = gScene.envMap.eval(WorldRayDirection());
 
-        rayData.radiance += rayData.thp * Le;
+        if (kUseSpectral)
+        {
+            rayData.col += getSpectralEmission(Le, rayData.lambda_idx) *
+                           getSpectralReflectance(rayData.thp, rayData.lambda_idx);
+        }
+        else
+        {
+            rayData.radiance += rayData.thp * Le;
+        }
     }
 }
 

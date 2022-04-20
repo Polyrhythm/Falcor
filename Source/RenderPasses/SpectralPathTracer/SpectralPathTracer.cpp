@@ -29,6 +29,7 @@
 #include "RenderGraph/RenderPassHelpers.h"
 
 #include "Utils/Color/Spectrum.h"
+#include "Utils/Color/SpectrumUtils.h"
 
 const RenderPass::Info SpectralPathTracer::kInfo { "SpectralPathTracer", "Fork of minimal pathtracer to include spectral rendering." };
 
@@ -78,6 +79,7 @@ SpectralPathTracer::SharedPtr SpectralPathTracer::create(RenderContext* pRenderC
 
 SpectralPathTracer::SpectralPathTracer(const Dictionary& dict)
     : RenderPass(kInfo)
+    , mSampleSpectrum(SpectrumUtils::sD65_5nm)
 {
     parseDictionary(dict);
 
@@ -86,6 +88,9 @@ SpectralPathTracer::SpectralPathTracer(const Dictionary& dict)
     FALCOR_ASSERT(mpSampleGenerator);
 
     mpPixelDebug = PixelDebug::create();
+
+
+    mSpectrumUI = SpectrumUI<float>(mSampleSpectrum.getWavelengthRange(), float2(60.0f, 100.0f));
 }
 
 void SpectralPathTracer::parseDictionary(const Dictionary& dict)
@@ -240,14 +245,28 @@ void SpectralPathTracer::renderUI(Gui::Widgets& widget)
         mpPixelDebug->renderUI(group);
     }
 
+    if (mUseSpectral)
+    {
+        dirty |= renderSpectrumUI(widget);
+    }
+
     if (dirty)
     {
         mOptionsChanged = true;
     }
+
 }
 
-void SpectralPathTracer::renderSpectrumUI(Gui::Widgets& widget)
+
+bool SpectralPathTracer::renderSpectrumUI(Gui::Widgets& widget)
 {
+
+    if (auto group = widget.group("Spectral"))
+    {
+        return Falcor::renderSpectrumUI(widget, mSampleSpectrum, mSpectrumUI, "Spectrum UI");
+    }
+
+    return false;
 }
 
 void SpectralPathTracer::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)

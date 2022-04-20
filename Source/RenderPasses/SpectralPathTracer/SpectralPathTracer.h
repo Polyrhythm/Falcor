@@ -30,6 +30,10 @@
 #include "Utils/Sampling/SampleGenerator.h"
 #include "Utils/Debug/PixelDebug.h"
 
+#include "Utils/UI/SpectrumUI.h"
+
+#include <vector>
+
 using namespace Falcor;
 
 class SpectralPathTracer : public RenderPass
@@ -58,7 +62,10 @@ private:
     SpectralPathTracer(const Dictionary& dict);
     void parseDictionary(const Dictionary& dict);
     void prepareVars();
-    void renderSpectrumUI(Gui::Widgets& widget);
+    bool renderSpectrumUI(Gui::Widgets& widget);
+
+    SpectrumUI<float> mSpectrumUI;
+    SampledSpectrum<float> mSampleSpectrum;
 
     // internal state
     Scene::SharedPtr mpScene;

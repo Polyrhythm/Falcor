@@ -1,0 +1,20 @@
+quadMesh = TriangleMesh.createQuad()
+
+white = StandardMaterial('White')
+white.baseColor = float4(1.0, 1.0, 1.0, 1.0)
+white.roughness = 1.0
+
+planeId = sceneBuilder.addTriangleMesh(quadMesh, white)
+planeNodeId = sceneBuilder.addNode('Plane', Transform(scaling=1, translation=float3(0, 0, 0)))
+sceneBuilder.addMeshInstance(planeId, planeNodeId)
+
+camera = Camera('TopCam')
+camera.position = float3(0, 2, 0)
+camera.up = float3(0, 1, 0)
+camera.focalLength = 35
+sceneBuilder.addCamera(camera)
+
+light0 = PointLight('Light0')
+#light0_pos = float3(0, 1, 0)
+#light0.intensity = 1
+sceneBuilder.addLight(light0)
